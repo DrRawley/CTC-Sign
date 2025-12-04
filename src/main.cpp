@@ -1,0 +1,620 @@
+#include <Arduino.h>
+#include <FastLED.h>
+#include <ezButton.h>
+#include <EEPROM.h>
+#include <math.h>
+
+// Digital Pins
+#define DATA_PIN 2
+#define SELECT_BUTTON_PIN 10
+
+// Analog Pins
+#define POT_PIN 0
+#define MIC_PIN 1
+
+// Mic Sensitivities
+#define EEPROM_MIC_BASE_LEVEL_LOCATION 1
+float micBaseLevel = 3.0;
+float micScalingFactor = 10.0;
+
+#define NUM_LEDS 31
+// #define BRIGHTNESS  64
+CRGB leds[NUM_LEDS];
+
+// Setup buttons
+ezButton button1(SELECT_BUTTON_PIN);
+
+byte selection = 0;
+
+// Define LEDs per Letter
+const int letterC1[11] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+const int letterT[9] = {11, 12, 13, 14, 15, 16, 17, 18, 19};
+const int letterC2[11] = {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30};
+const int sizeC1 = 11;
+const int sizeT = 9;
+const int sizeC2 = 11;
+
+// Define LEDs per row
+const int numRows = 5;
+const int rows[numRows][11] = {
+    {7, 8, 9, 15, 16, 17, 18, 19, 27, 28, 29}, // 11
+    {6, 10, 14, 26, 30},                       // 5
+    {5, 13, 25},                               // 3
+    {4, 0, 12, 24, 20},                        // 5
+    {3, 2, 1, 11, 23, 22, 21}                  // 7
+};
+const int rowSizes[numRows] = {11, 5, 3, 5, 7};
+
+// Define Leds per column
+const int numColumns = 17;
+const int columns[numColumns][6] = {
+    {4, 5, 6},
+    {3, 7},
+    {2, 8},
+    {1, 9},
+    {0, 10},
+    {},
+    {15},
+    {16},
+    {11, 12, 13, 14, 17},
+    {18},
+    {19},
+    {},
+    {24, 25, 26},
+    {23, 27},
+    {22, 28},
+    {21, 29},
+    {20, 30}};
+const int colSizes[numColumns] = {3, 2, 2, 2, 2, 0, 1, 1, 5, 1, 1, 0, 3, 2, 2, 2, 2};
+
+// Define LEDs per Diagonal
+const int numDiags = 21;
+const int diags[numDiags][3] = {
+    {},           // 0
+    {3, 4},       // 1
+    {2, 5},       // 2
+    {1, 6},       // 3
+    {},           // 4
+    {0, 7},       // 5
+    {8},          // 6
+    {9, 10},      // 7
+    {11},         // 8
+    {12},         // 9
+    {13, 15},     // 10
+    {14, 16},     // 11
+    {17},         // 12
+    {18, 23, 24}, // 13
+    {19, 22, 25}, // 14
+    {21, 26},     // 15
+    {},           // 16
+    {20, 27},     // 17
+    {28},         // 18
+    {29, 30},     // 19
+    {}            // 20
+};
+const int diagsSizes[numDiags] = {0, 2, 2, 2, 0, 2, 1, 2, 1, 1, 2, 2, 1, 3, 3, 2, 0, 2, 1, 2, 0};
+
+// Define LEDs for opposite diagonal
+const int diagsBackwards[numDiags][5] = {
+    {},         // 0
+    {6, 7},     // 1
+    {5, 8},     // 2
+    {4, 9},     // 3
+    {},         // 4
+    {3, 10},    // 5
+    {2, 15},    // 6
+    {0, 1, 16}, // 7
+    {17},       // 8
+    {14, 18},   // 9
+    {13, 19},   // 10
+    {12},       // 11
+    {11},       // 12
+    {26, 27},   // 13
+    {25, 28},   // 14
+    {24, 29},   // 15
+    {},         // 16
+    {23, 30},   // 17
+    {22},       // 18
+    {20, 21},   // 19
+    {}          // 20
+};
+const int diagsBackwardsSizes[numDiags] = {0, 2, 2, 2, 0, 2, 2, 3, 1, 2, 2, 1, 1, 2, 2, 2, 0, 2, 1, 2, 0};
+
+// Declare function definitions
+const int numberSelections = 11;
+void solid(int hue);
+void colorLettersStatic(int hue);
+void backAndForth(int hue);
+void chase(int hue);
+void verticalChase(int hue);
+void verticalRainbow(void);
+void horizontalChase(int hue);
+void diagChase(int hue, int diagsDirection);
+
+// Function definitions for audio input
+int getMicValue(void);
+void serialCheckAndSet(void);
+float setMicBaseLevel(float);
+float setMicScalingFactor(float);
+float getSerialFloat(void);
+void basicVUMeter(void);
+void intensityVUMeter(void);
+
+void setup()
+{
+  Serial.begin(9600);
+  FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
+  button1.setDebounceTime(100);
+  selection = EEPROM.read(0);
+  if (!(selection < numberSelections))
+  {
+    selection = 0;
+  }
+  float readValue = 0;
+  EEPROM.get(EEPROM_MIC_BASE_LEVEL_LOCATION, readValue);
+  setMicBaseLevel(readValue);
+  Serial.print("Loaded mic base level: ");
+  Serial.print(micBaseLevel);
+  EEPROM.get(EEPROM_MIC_BASE_LEVEL_LOCATION + sizeof(float), readValue);
+  setMicScalingFactor(readValue);
+  Serial.print("  Loaded mic scaling factor: ");
+  Serial.println(micScalingFactor);
+  Serial.println("Enter b to set Mic Base Level.  Enter f to set Mic Scaling Factor.");
+}
+
+void loop()
+{
+  static int potValue = 0;
+  button1.loop();
+
+  serialCheckAndSet();
+
+  if (button1.isPressed())
+  {
+    selection++;
+    if (!(selection < numberSelections))
+    {
+      selection = 0;
+    }
+    // EEPROM.update(0, selection);
+  }
+  potValue = (int)map(analogRead(POT_PIN), 0, 1024, 0, 0xff);
+
+  switch (selection)
+  {
+  case 0:
+    // colorLettersStatic(potValue);
+    colorLettersStatic(0); // Make zero so that it stays on green-blue-green
+    break;
+  case 1:
+    solid(potValue);
+    break;
+  case 2:
+    backAndForth(potValue);
+    break;
+  case 3:
+    chase(potValue);
+    break;
+  case 4:
+    verticalChase(potValue);
+    break;
+  case 5:
+    verticalRainbow();
+    break;
+  case 6:
+    horizontalChase(potValue);
+    break;
+  case 7:
+    diagChase(potValue, 0);
+    break;
+  case 8:
+    diagChase(potValue, 1); // 1 for backwards diagonals
+    break;
+  case 9:
+    basicVUMeter();
+    break;
+  case 10:
+    intensityVUMeter();
+    break;
+  default:
+    break;
+  }
+}
+
+void backAndForth(int hue)
+{
+  for (int dot = 0; dot < NUM_LEDS; dot++)
+  {
+    leds[dot] = CHSV(hue, 0xff, 0x60);
+    FastLED.show();
+    // clear this led for the next time around the loop
+    leds[dot] = CRGB::Black;
+    // delay(10);
+  }
+
+  for (int dot = 0; dot < NUM_LEDS; dot++)
+  {
+
+    leds[NUM_LEDS - dot - 1] = CHSV(hue, 0xff, 0x60);
+
+    FastLED.show();
+    // clear this led for the next time around the loop
+    leds[NUM_LEDS - dot - 1] = CRGB::Black;
+    // delay(10);
+  }
+}
+
+void solid(int hue)
+{
+  for (int dot = 0; dot < NUM_LEDS; dot++)
+  {
+    leds[dot].setHSV(hue, 0xff, 0x40);
+  }
+  FastLED.show();
+}
+
+void chase(int hue)
+{
+  static int offset = 0;
+  static int iLimit = NUM_LEDS / 5 + 1;
+  static unsigned long timer = millis();
+  const int dither[] = {0x80, 0x60, 0x40, 0x20, 0x10};
+
+  if (millis() - timer > 200)
+  {
+    for (int i = 0; i < iLimit; i++)
+    {
+      for (int j = 0; j < 5; j++)
+      {
+        int index = i * 5 + j;
+        if (index < NUM_LEDS) // Make sure not writing outside of length of leds[]
+        {
+          leds[i * 5 + j].setHSV(hue, 0xff, dither[(5 - j + offset) % 5]); // this index was annoying
+        }
+      }
+    }
+    FastLED.show();
+    offset++;
+    timer = millis();
+  }
+}
+
+void verticalChase(int hue)
+{
+  static int offset = 0;
+  static unsigned long timer = millis();
+  const int dither[] = {0x80, 0x60, 0x40, 0x20, 0x10};
+  // int ditherInx = 0;
+
+  if (millis() - timer > 100)
+  {
+    for (int i = 0; i < numColumns; i++)
+    {
+      for (int j = 0; j < colSizes[i]; j++)
+      {
+        leds[columns[i][j]].setHSV(hue, 0xff, dither[(5 - i % 5 + offset) % 5]);
+      }
+    }
+    FastLED.show();
+    offset++;
+    timer = millis();
+  }
+}
+
+void verticalRainbow(void)
+{
+  static int offset = 0;
+  static unsigned long timer = millis();
+
+  if (millis() - timer > 100)
+  {
+    for (int i = 0; i < numColumns; i++)
+    {
+      for (int j = 0; j < colSizes[i]; j++)
+      {
+        leds[columns[i][j]].setHSV((i + offset + 5) % 255, 0xff, 0x40);
+      }
+    }
+    FastLED.show();
+    offset++;
+    timer = millis();
+  }
+}
+
+void horizontalChase(int hue)
+{
+  static int offset = 0;
+  static unsigned long timer = millis();
+  const int dither[] = {0x80, 0x60, 0x40, 0x20, 0x10};
+  // int ditherInx = 0;
+
+  if (millis() - timer > 100)
+  {
+    for (int i = 0; i < numRows; i++)
+    {
+      for (int j = 0; j < rowSizes[i]; j++)
+      {
+        leds[rows[i][j]].setHSV(hue, 0xff, dither[(5 - i % 5 + offset) % 5]);
+      }
+    }
+    FastLED.show();
+    offset++;
+    timer = millis();
+  }
+}
+
+void colorLettersStatic(int hue)
+{
+  static int offset = 0;
+  static unsigned long timer = millis();
+  static unsigned long timerLong = millis();
+  static bool firstTime = true;
+  static int brightness = 0x40;
+
+  if (millis() - timer > 200)
+  {
+    if (millis() - timerLong > 5000 || firstTime)
+    {
+      for (int i = 0; i < sizeC1; i++)
+      {
+        leds[letterC1[i]].setHSV((96 + hue) % 0xff, 0xff, brightness);
+      }
+      for (int i = 0; i < sizeT; i++)
+      {
+        leds[letterT[i]].setHSV((160 + hue) % 0xff, 0xff, brightness);
+      }
+      for (int i = 0; i < sizeC2; i++)
+      {
+        leds[letterC2[i]].setHSV((96 + hue) % 0xff, 0xff, brightness);
+      }
+      firstTime = false;
+    }
+
+    FastLED.show();
+    offset++;
+  }
+}
+
+void diagChase(int hue, int diagsDirection)
+{
+  static int offset = 0;
+  static unsigned long timer = millis();
+  const int dither[] = {0x80, 0x60, 0x40, 0x20, 0x10};
+  int size = 0;
+
+  if (millis() - timer > 100)
+  {
+    for (int i = 0; i < numDiags; i++)
+    {
+      if (diagsDirection == 0)
+      {
+        size = diagsSizes[i];
+      }
+      else
+      {
+        size = diagsBackwardsSizes[i];
+      }
+      for (int j = 0; j < size; j++)
+      {
+        if (diagsDirection == 0)
+        {
+          leds[diags[i][j]].setHSV(hue, 0xff, dither[(5 - i % 5 + offset) % 5]);
+        }
+        else
+        {
+          leds[diagsBackwards[i][j]].setHSV(hue, 0xff, dither[(5 - i % 5 + offset) % 5]);
+        }
+      }
+    }
+    FastLED.show();
+    offset++;
+    timer = millis();
+  }
+}
+
+int getMicValue(void)
+{
+  int val = 0;
+  const int sampleSize = 256;
+  const byte shiftAmount = 8;
+  long accumulator = 0;
+
+  for (int i = 0; i < sampleSize; i++)
+  {
+    val = analogRead(MIC_PIN);
+    val = val - 512;
+    val = abs(val);
+    accumulator += val;
+  }
+  int average = (int)(accumulator >> shiftAmount); // Fast divide by sampleSize by shifting shiftAmount bits.
+
+  if (average < 0)
+  {
+    average = 0;
+  }
+  return average;
+}
+
+float setMicBaseLevel(float newMicBaseLevel)
+{
+  if (newMicBaseLevel > 0)
+  {
+    micBaseLevel = newMicBaseLevel;
+  }
+
+  return micBaseLevel;
+}
+
+float setMicScalingFactor(float newMicScalingFactor)
+{
+  if (newMicScalingFactor > 0)
+  {
+    micScalingFactor = newMicScalingFactor;
+  }
+
+  return micScalingFactor;
+}
+
+float getSerialFloat(void)
+{
+  byte index = 0;
+  char endMarker = '\n';
+  char rc;
+  bool receivedEndMarker = false;
+  const byte numChars = 6;
+  char receivedChars[numChars];
+  while (receivedEndMarker == false)
+  {
+    while (!Serial.available())
+      ;
+
+    rc = Serial.read();
+    if (rc != endMarker)
+    {
+      if (isDigit(rc) || rc == '.')
+      {
+        receivedChars[index] = rc;
+        index++;
+        Serial.print(rc);
+      }
+
+      if (index >= numChars)
+      {
+        index = numChars - 1;
+      }
+    }
+    else
+    {
+      receivedChars[index] = '\0';
+      index = 0;
+      receivedEndMarker = true;
+      Serial.println("");
+    }
+  }
+
+  return atof(receivedChars);
+}
+
+void serialCheckAndSet()
+{
+  if (Serial.available())
+  {
+    char option = Serial.read();
+    Serial.println(option);
+
+    if (option == '\n')
+    {
+      Serial.print("Current mic base level: ");
+      Serial.print(micBaseLevel);
+      Serial.print("  Current mic scaling factor: ");
+      Serial.println(micScalingFactor);
+      Serial.println("Enter b to set Mic Base Level.  Enter f to set Mic Scaling Factor.");
+    }
+    if (option == 'b' || option == 'B')
+    {
+      Serial.print("Current mic base level: ");
+      Serial.println(micBaseLevel);
+      Serial.print("Enter new mic base level: ");
+
+      float result = getSerialFloat();
+      result = setMicBaseLevel(result);
+      EEPROM.put(EEPROM_MIC_BASE_LEVEL_LOCATION, micBaseLevel);
+
+      Serial.print("New Mic Base Level: ");
+      Serial.println(result);
+    }
+    if (option == 'f' || option == 'F')
+    {
+      Serial.print("Current mic scaling factor: ");
+      Serial.println(micScalingFactor);
+      Serial.print("Enter new mic scaling factor: ");
+
+      float result = getSerialFloat();
+      result = setMicScalingFactor(result);
+      EEPROM.put(EEPROM_MIC_BASE_LEVEL_LOCATION + sizeof(float), micScalingFactor);
+
+      Serial.print("New Mic Scaling Factor: ");
+      Serial.println(result);
+    }
+  }
+}
+
+void basicVUMeter(void)
+{
+  int numIntensities = numRows * 4;
+  int value = getMicValue();
+
+  int intensity = (int)(micScalingFactor * log10((float)value / micBaseLevel));
+
+  if (intensity > numIntensities - 1)
+  {
+    intensity = numIntensities - 1;
+  }
+  else if (intensity < 0)
+  {
+    intensity = 0;
+  }
+
+  const byte brightnessGradient[4] = {32, 64, 96, 128};
+  const byte colorGradient[5] = {0, 64, 96, 96, 96}; // red, yel, grn, grn, grn  // in this order because row 0 is the top row
+  // Loop to set row color and brightness based off of intensity; only necessary to loop up to the intensity
+  for (int i = 0; i < intensity; i++)
+  {
+    int rowNumberIndex = 4 - (int)(i / 4); // Calc current row based on index --> 4 intensities per row
+    int brightness = brightnessGradient[i % 4];
+
+    for (int j = 0; j < rowSizes[rowNumberIndex]; j++) // Fill leds for current row
+    {
+      leds[rows[rowNumberIndex][j]].setHSV(colorGradient[rowNumberIndex], 0xff, brightness);
+    }
+  }
+
+  FastLED.show();
+
+  // for (int i = 0; i < NUM_LEDS; i++)
+  // {
+  //   leds[i].setHSV(160, 0xff, 0x20);
+  // }
+
+  for (int i = 0; i < sizeC1; i++)
+  {
+    leds[letterC1[i]].setHSV(96, 0xff, 10);
+  }
+  for (int i = 0; i < sizeT; i++)
+  {
+    leds[letterT[i]].setHSV(160, 0xff, 20);
+  }
+  for (int i = 0; i < sizeC2; i++)
+  {
+    leds[letterC2[i]].setHSV(96, 0xff, 10);
+  }
+}
+
+void intensityVUMeter(void)
+{
+  int numIntensities = 20;
+  int value = getMicValue();
+
+  int intensity = (int)(micScalingFactor * log10((float)value / micBaseLevel));
+
+  if (intensity > numIntensities) // Don't need a "- 1" here because it's not being indexed
+  {
+    intensity = numIntensities;
+  }
+  else if (intensity < 0)
+  {
+    intensity = 0;
+  }
+
+  int brightness = 0;
+  brightness = (0x80 - 0x10) * intensity / numIntensities + 0x10;
+  int hue = 0;
+  hue = (85 - 160) * intensity / numIntensities + 160;
+
+  for (int i = 0; i < NUM_LEDS; i++)
+  {
+    leds[i].setHSV(hue % 0xff, 0xff, brightness);
+  }
+
+  FastLED.show();
+}
