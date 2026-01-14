@@ -13,6 +13,9 @@
 #define MIC_PIN 1
 
 // Mic Sensitivities
+#define EEPROM_MIC_MAX_BYTE_LOCATION 1
+int micMax = 1024;
+int micMin = 0;
 #define EEPROM_MIC_BASE_LEVEL_LOCATION 1
 float micBaseLevel = 3.0;
 float micScalingFactor = 10.0;
@@ -132,7 +135,12 @@ void horizontalChase(int hue);
 void diagChase(int hue, int diagsDirection);
 
 // Function definitions for audio input
+int *computeIntensitySpread(int);
 int getMicValue(void);
+int getSerialInteger(void);
+int setMicMax(int);
+int setMicMin(int);
+
 void serialCheckAndSet(void);
 float setMicBaseLevel(float);
 float setMicScalingFactor(float);
@@ -150,16 +158,11 @@ void setup()
   {
     selection = 0;
   }
-  float readValue = 0;
-  EEPROM.get(EEPROM_MIC_BASE_LEVEL_LOCATION, readValue);
-  setMicBaseLevel(readValue);
-  Serial.print("Loaded mic base level: ");
-  Serial.print(micBaseLevel);
-  EEPROM.get(EEPROM_MIC_BASE_LEVEL_LOCATION + sizeof(float), readValue);
-  setMicScalingFactor(readValue);
-  Serial.print("  Loaded mic scaling factor: ");
-  Serial.println(micScalingFactor);
-  Serial.println("Enter b to set Mic Base Level.  Enter f to set Mic Scaling Factor.");
+  // int readValue = 0;
+  // EEPROM.get(EEPROM_MIC_MAX_BYTE_LOCATION, readValue);
+  // setMicMax(readValue);
+  // EEPROM.get(EEPROM_MIC_MAX_BYTE_LOCATION + sizeof(int), readValue);
+  // setMicMin(readValue);
 }
 
 void loop()
@@ -435,6 +438,89 @@ int getMicValue(void)
   return average;
 }
 
+int *computeIntensitySpread(int size)
+{
+  int *intensitySpread = (int *)malloc(size * sizeof(int));
+  if (intensitySpread == NULL)
+  {
+    Serial.println("Memory allocation failed!");
+    while (true)
+      ;
+  }
+
+  float scaleFactor = 3.0 - log((float)size) / log(5.0);
+
+  for (int i = 0; i < size; i++)
+  {
+    int intensity = floor((pow((1 / scaleFactor), (float)(size - i)) * (double)(micMax - micMin) + (double)micMin));
+
+    if (intensity >= 0)
+    {
+      intensitySpread[i] = intensity;
+    }
+    else
+    {
+      intensitySpread[i] = 0;
+    }
+  }
+
+  Serial.print("Upper: ");
+  Serial.print(micMax);
+  Serial.print(" Lower: ");
+  Serial.println(micMin);
+  Serial.println("Intensity spread computed.");
+  Serial.println(scaleFactor, 10);
+
+  for (int i = 0; i < size; i++)
+  {
+    Serial.print(i);
+    Serial.print(": ");
+    Serial.println(intensitySpread[i]);
+  }
+
+  return intensitySpread;
+}
+
+int getSerialInteger(void)
+{
+  byte index = 0;
+  char endMarker = '\n';
+  char rc;
+  bool receivedEndMarker = false;
+  const byte numChars = 6;
+  char receivedChars[numChars];
+  while (receivedEndMarker == false)
+  {
+    while (!Serial.available())
+      ;
+
+    rc = Serial.read();
+    if (rc != endMarker)
+    {
+      if (isDigit(rc) || rc == '-')
+      {
+        receivedChars[index] = rc;
+        index++;
+        Serial.print(rc);
+      }
+
+      if (index >= numChars)
+      {
+        index = numChars - 1;
+      }
+    }
+    else
+    {
+      receivedChars[index] = '\0';
+      index = 0;
+      receivedEndMarker = true;
+      Serial.println("");
+    }
+  }
+
+  return atoi(receivedChars);
+}
+
 float setMicBaseLevel(float newMicBaseLevel)
 {
   if (newMicBaseLevel > 0)
@@ -495,6 +581,32 @@ float getSerialFloat(void)
   return atof(receivedChars);
 }
 
+int setMicMax(int newMicMax)
+{
+  if (newMicMax >= 1024)
+  {
+    micMax = 1023;
+  }
+  else if (newMicMax >= micMin)
+  {
+    micMax = newMicMax;
+  }
+  return micMax;
+}
+
+int setMicMin(int newMicMin)
+{
+  if (newMicMin <= -64)
+  {
+    micMax = -64;
+  }
+  else if (newMicMin <= micMax)
+  {
+    micMin = newMicMin;
+  }
+  return micMin;
+}
+
 void serialCheckAndSet()
 {
   if (Serial.available())
@@ -518,7 +630,7 @@ void serialCheckAndSet()
 
       float result = getSerialFloat();
       result = setMicBaseLevel(result);
-      EEPROM.put(EEPROM_MIC_BASE_LEVEL_LOCATION, micBaseLevel);
+      // EEPROM.put(EEPROM_MIC_BASE_LEVEL_LOCATION, micBaseLevel);
 
       Serial.print("New Mic Base Level: ");
       Serial.println(result);
@@ -531,7 +643,7 @@ void serialCheckAndSet()
 
       float result = getSerialFloat();
       result = setMicScalingFactor(result);
-      EEPROM.put(EEPROM_MIC_BASE_LEVEL_LOCATION + sizeof(float), micScalingFactor);
+      // EEPROM.put(EEPROM_MIC_BASE_LEVEL_LOCATION + sizeof(float), micScalingFactor);
 
       Serial.print("New Mic Scaling Factor: ");
       Serial.println(result);
@@ -542,18 +654,79 @@ void serialCheckAndSet()
 void basicVUMeter(void)
 {
   int numIntensities = numRows * 4;
+  // static int *intensitySpread = computeIntensitySpread(numIntensities);
   int value = getMicValue();
 
   int intensity = (int)(micScalingFactor * log10((float)value / micBaseLevel));
 
-  if (intensity > numIntensities - 1)
+  if (intensity > numIntensities)
   {
-    intensity = numIntensities - 1;
+    intensity = numIntensities;
   }
   else if (intensity < 0)
   {
     intensity = 0;
   }
+  // FastLED.setBrightness(0x40);
+
+  // if (Serial.available())
+  // {
+  //   char option = Serial.read();
+  //   Serial.println(option);
+
+  //   if (option == 'u' || option == 'U')
+  //   {
+
+  //     Serial.println("Enter upper limit...");
+
+  //     int result = getSerialInteger();
+  //     result = setMicMax(result);
+  //     EEPROM.put(EEPROM_MIC_MAX_BYTE_LOCATION, micMax);
+
+  //     Serial.print("Received: ");
+  //     Serial.println(result);
+
+  //     free(intensitySpread);
+  //     intensitySpread = computeIntensitySpread(numIntensities);
+  //   }
+  //   if (option == 'l' || option == 'L')
+  //   {
+
+  //     Serial.println("Enter lower limit...");
+
+  //     int result = getSerialInteger();
+  //     result = setMicMin(result);
+  //     EEPROM.put(EEPROM_MIC_MAX_BYTE_LOCATION + sizeof(int), micMin);
+
+  //     Serial.print("Received: ");
+  //     Serial.println(result);
+
+  //     free(intensitySpread);
+  //     intensitySpread = computeIntensitySpread(numIntensities);
+  //   }
+  // }
+
+  // if (delta > intensitySpread[numRows - 1])
+  //   intensity = 5;
+  // else if (delta > intensitySpread[numRows - 2])
+  //   intensity = 4;
+  // else if (delta > intensitySpread[numRows - 3])
+  //   intensity = 3;
+  // else if (delta > intensitySpread[numRows - 4])
+  //   intensity = 2;
+  // else if (delta > intensitySpread[numRows - 5])
+  //   intensity = 1;
+  // else
+  //   intensity = 0;
+
+  // for (int i = 0; i < numIntensities; i++)
+  // {
+  //   if (delta >= intensitySpread[numIntensities - i - 1])
+  //   {
+  //     intensity = numIntensities - i;
+  //     break;
+  //   }
+  // }
 
   const byte brightnessGradient[4] = {32, 64, 96, 128};
   const byte colorGradient[5] = {0, 64, 96, 96, 96}; // red, yel, grn, grn, grn  // in this order because row 0 is the top row
@@ -569,35 +742,63 @@ void basicVUMeter(void)
     }
   }
 
+  // switch (intensity)
+  // {
+  // case 5:
+  //   // leds[4] = CRGB::Red;
+  //   // Row 0 is the top
+  //   for (int j = 0; j < rowSizes[0]; j++)
+  //   {
+  //     leds[rows[0][j]] = CRGB::Red;
+  //   }
+  // case 4:
+  //   // leds[3] = CRGB::Yellow;
+  //   for (int j = 0; j < rowSizes[1]; j++)
+  //   {
+  //     leds[rows[1][j]] = CRGB::Yellow;
+  //   }
+  // case 3:
+  //   // leds[2] = CRGB::Green;
+  //   for (int j = 0; j < rowSizes[2]; j++)
+  //   {
+  //     leds[rows[2][j]] = CRGB::Green;
+  //   }
+  // case 2:
+  //   // leds[1] = CRGB::Green;
+  //   for (int j = 0; j < rowSizes[3]; j++)
+  //   {
+  //     leds[rows[3][j]] = CRGB::Green;
+  //   }
+  // case 1:
+  //   // leds[0] = CRGB::Green;
+  //   // Row 4 is the bottom
+  //   for (int j = 0; j < rowSizes[4]; j++)
+  //   {
+  //     leds[rows[4][j]] = CRGB::Green;
+  //   }
+  // default:
+  //   break;
+  // }
   FastLED.show();
 
-  // for (int i = 0; i < NUM_LEDS; i++)
-  // {
-  //   leds[i].setHSV(160, 0xff, 0x20);
-  // }
+  // FastLED.setBrightness(0xff);
 
-  for (int i = 0; i < sizeC1; i++)
+  for (int i = 0; i < NUM_LEDS; i++)
   {
-    leds[letterC1[i]].setHSV(96, 0xff, 10);
-  }
-  for (int i = 0; i < sizeT; i++)
-  {
-    leds[letterT[i]].setHSV(160, 0xff, 20);
-  }
-  for (int i = 0; i < sizeC2; i++)
-  {
-    leds[letterC2[i]].setHSV(96, 0xff, 10);
+    // leds[i] = CRGB::Black;
+    leds[i].setHSV(160, 0xff, 0x20);
   }
 }
 
 void intensityVUMeter(void)
 {
   int numIntensities = 20;
+  // static int *intensitySpread = computeIntensitySpread(numIntensities);
   int value = getMicValue();
 
   int intensity = (int)(micScalingFactor * log10((float)value / micBaseLevel));
 
-  if (intensity > numIntensities) // Don't need a "- 1" here because it's not being indexed
+  if (intensity > numIntensities)
   {
     intensity = numIntensities;
   }
@@ -605,6 +806,54 @@ void intensityVUMeter(void)
   {
     intensity = 0;
   }
+
+  // if (Serial.available())
+  // {
+  //   char option = Serial.read();
+  //   Serial.println(option);
+
+  //   if (option == 'u' || option == 'U')
+  //   {
+
+  //     Serial.println("Enter upper limit...");
+
+  //     int result = getSerialInteger();
+  //     result = setMicMax(result);
+  //     EEPROM.put(EEPROM_MIC_MAX_BYTE_LOCATION, micMax);
+
+  //     Serial.print("Received: ");
+  //     Serial.println(result);
+
+  //     free(intensitySpread);
+  //     intensitySpread = computeIntensitySpread(numIntensities);
+  //   }
+  //   if (option == 'l' || option == 'L')
+  //   {
+
+  //     Serial.println("Enter lower limit...");
+
+  //     int result = getSerialInteger();
+  //     result = setMicMin(result);
+  //     EEPROM.put(EEPROM_MIC_MAX_BYTE_LOCATION + sizeof(int), micMin);
+
+  //     Serial.print("Received: ");
+  //     Serial.println(result);
+
+  //     free(intensitySpread);
+  //     intensitySpread = computeIntensitySpread(numIntensities);
+  //   }
+  // }
+
+  // int intensity = 0;
+
+  // for (int i = 0; i < numIntensities; i++)
+  // {
+  //   if (delta >= intensitySpread[numIntensities - i - 1])
+  //   {
+  //     intensity = numIntensities - i;
+  //     break;
+  //   }
+  // }
 
   int brightness = 0;
   brightness = (0x80 - 0x10) * intensity / numIntensities + 0x10;

@@ -16,135 +16,147 @@
 #define EEPROM_MIC_BASE_LEVEL_LOCATION 1
 float micBaseLevel = 3.0;
 float micScalingFactor = 10.0;
+int micOffset = 0;
 
 #define NUM_LEDS 31
-// #define BRIGHTNESS  64
+#define MAX_BRIGHTNESS 0x64
 CRGB leds[NUM_LEDS];
 
 // Setup buttons
 ezButton button1(SELECT_BUTTON_PIN);
 
-byte selection = 0;
+// Dither Array Definition
+const byte ditherSize = 12;
+byte dither[ditherSize];
 
 // Define LEDs per Letter
-const int letterC1[11] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-const int letterT[9] = {11, 12, 13, 14, 15, 16, 17, 18, 19};
-const int letterC2[11] = {20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30};
-const int sizeC1 = 11;
-const int sizeT = 9;
-const int sizeC2 = 11;
+const byte sizeLetter1 = 11;
+const byte sizeLetter2 = 9;
+const byte sizeLetter3 = 11;
+const byte letter1[sizeLetter1] = {7, 8, 9, 6, 10, 5, 4, 0, 3, 2, 1};
+const byte letter2[sizeLetter2] = {15, 16, 17, 18, 19, 14, 13, 12, 11};
+const byte letter3[sizeLetter3] = {27, 28, 29, 26, 30, 25, 24, 20, 23, 22, 21};
 
 // Define LEDs per row
-const int numRows = 5;
-const int rows[numRows][11] = {
-    {7, 8, 9, 15, 16, 17, 18, 19, 27, 28, 29}, // 11
-    {6, 10, 14, 26, 30},                       // 5
-    {5, 13, 25},                               // 3
-    {4, 0, 12, 24, 20},                        // 5
-    {3, 2, 1, 11, 23, 22, 21}                  // 7
-};
-const int rowSizes[numRows] = {11, 5, 3, 5, 7};
+const byte numRows = 5;
+const byte rows[numRows][11] = {
+    {3, 2, 1, 11, 23, 22, 21},
+    {4, 0, 12, 24, 20},
+    {5, 13, 25},
+    {6, 10, 14, 26, 30},
+    {7, 8, 9, 15, 16, 17, 18, 19, 27, 28, 29}};
+const byte rowSizes[numRows] = {7, 5, 3, 5, 11};
 
 // Define Leds per column
-const int numColumns = 17;
-const int columns[numColumns][6] = {
-    {4, 5, 6},
-    {3, 7},
-    {2, 8},
-    {1, 9},
-    {0, 10},
+const byte numColumns = 17;
+const byte columns[numColumns][5] = {
+    {6, 5, 4},
+    {7, 3},
+    {8, 2},
+    {9, 1},
+    {10, 0},
     {},
     {15},
     {16},
-    {11, 12, 13, 14, 17},
+    {17, 14, 13, 12, 11},
     {18},
     {19},
     {},
-    {24, 25, 26},
-    {23, 27},
-    {22, 28},
-    {21, 29},
-    {20, 30}};
-const int colSizes[numColumns] = {3, 2, 2, 2, 2, 0, 1, 1, 5, 1, 1, 0, 3, 2, 2, 2, 2};
+    {26, 25, 24},
+    {27, 23},
+    {28, 22},
+    {29, 21},
+    {30, 20}};
+const byte colSizes[numColumns] = {3, 2, 2, 2, 2, 0, 1, 1, 5, 1, 1, 0, 3, 2, 2, 2, 2};
 
 // Define LEDs per Diagonal
-const int numDiags = 21;
-const int diags[numDiags][3] = {
-    {},           // 0
-    {3, 4},       // 1
-    {2, 5},       // 2
-    {1, 6},       // 3
-    {},           // 4
-    {0, 7},       // 5
-    {8},          // 6
-    {9, 10},      // 7
-    {11},         // 8
-    {12},         // 9
-    {13, 15},     // 10
-    {14, 16},     // 11
-    {17},         // 12
-    {18, 23, 24}, // 13
-    {19, 22, 25}, // 14
-    {21, 26},     // 15
-    {},           // 16
-    {20, 27},     // 17
-    {28},         // 18
-    {29, 30},     // 19
-    {}            // 20
-};
-const int diagsSizes[numDiags] = {0, 2, 2, 2, 0, 2, 1, 2, 1, 1, 2, 2, 1, 3, 3, 2, 0, 2, 1, 2, 0};
+const byte numDiags = 21;
+const byte diags[numDiags][3] = {
+    {},
+    {7, 6},
+    {8, 5},
+    {9, 4},
+    {},
+    {10, 3},
+    {15, 2},
+    {16, 0, 1},
+    {17},
+    {18, 14},
+    {19, 13},
+    {12},
+    {11},
+    {27, 26},
+    {28, 25},
+    {29, 24},
+    {},
+    {30, 23},
+    {22},
+    {20, 21},
+    {}};
+const byte diagsSizes[numDiags] = {0, 2, 2, 2, 0, 2, 2, 3, 1, 2, 2, 1, 1, 2, 2, 2, 0, 2, 1, 2, 0};
 
 // Define LEDs for opposite diagonal
-const int diagsBackwards[numDiags][5] = {
-    {},         // 0
-    {6, 7},     // 1
-    {5, 8},     // 2
-    {4, 9},     // 3
-    {},         // 4
-    {3, 10},    // 5
-    {2, 15},    // 6
-    {0, 1, 16}, // 7
-    {17},       // 8
-    {14, 18},   // 9
-    {13, 19},   // 10
-    {12},       // 11
-    {11},       // 12
-    {26, 27},   // 13
-    {25, 28},   // 14
-    {24, 29},   // 15
-    {},         // 16
-    {23, 30},   // 17
-    {22},       // 18
-    {20, 21},   // 19
-    {}          // 20
-};
-const int diagsBackwardsSizes[numDiags] = {0, 2, 2, 2, 0, 2, 2, 3, 1, 2, 2, 1, 1, 2, 2, 2, 0, 2, 1, 2, 0};
+const byte diagsBackwards[numDiags][3] = {
+    {},
+    {4, 3},
+    {5, 2},
+    {6, 1},
+    {},
+    {7, 0},
+    {8},
+    {9, 10},
+    {11},
+    {12},
+    {15, 13},
+    {16, 14},
+    {17},
+    {18, 24, 23},
+    {19, 25, 22},
+    {26, 21},
+    {},
+    {27, 20},
+    {28},
+    {29, 30},
+    {}};
+const byte diagsBackwardsSizes[numDiags] = {0, 2, 2, 2, 0, 2, 1, 2, 1, 1, 2, 2, 1, 3, 3, 2, 0, 2, 1, 2, 0};
 
 // Declare function definitions
-const int numberSelections = 11;
-void solid(int hue);
-void colorLettersStatic(int hue);
-void backAndForth(int hue);
-void chase(int hue);
-void verticalChase(int hue);
-void verticalRainbow(void);
-void horizontalChase(int hue);
-void diagChase(int hue, int diagsDirection);
+byte selection = 0;               // Default function selection
+const byte numberSelections = 12; // Number of different functions
+void solid(byte hue);
+void colorLettersStatic(byte hue);
+void chase(byte hue);
+void verticalChase(byte hue);
+void verticalRainbow(byte potValue);
+void horizontalChase(byte hue);
+void diagChase(byte hue, byte diagsDirection);
+void randomLights(byte potValue);
+void yellowToWhite(byte potValue);
 
 // Function definitions for audio input
 int getMicValue(void);
 void serialCheckAndSet(void);
 float setMicBaseLevel(float);
 float setMicScalingFactor(float);
+int setMicOffset(int);
 float getSerialFloat(void);
-void basicVUMeter(void);
-void intensityVUMeter(void);
+void basicVUMeter(int);
+void intensityVUMeter(int);
 
 void setup()
 {
   Serial.begin(9600);
+  randomSeed(analogRead(2));
   FastLED.addLeds<NEOPIXEL, DATA_PIN>(leds, NUM_LEDS);
   button1.setDebounceTime(100);
+
+  // Calculate dither array
+  const float logDithersize = log10((float)(ditherSize + 1));
+  for (byte i = 0; i < ditherSize; i++)
+  {
+    dither[i] = (byte)(MAX_BRIGHTNESS * log10(ditherSize - i) / logDithersize);
+  }
+
   selection = EEPROM.read(0);
   if (!(selection < numberSelections))
   {
@@ -159,12 +171,17 @@ void setup()
   setMicScalingFactor(readValue);
   Serial.print("  Loaded mic scaling factor: ");
   Serial.println(micScalingFactor);
-  Serial.println("Enter b to set Mic Base Level.  Enter f to set Mic Scaling Factor.");
+  int readIntValue = 0;
+  EEPROM.get(EEPROM_MIC_BASE_LEVEL_LOCATION + sizeof(float) * 2, readIntValue);
+  setMicOffset(readIntValue);
+  Serial.print("  Loaded mic offset: ");
+  Serial.println(micOffset);
+  Serial.println("Enter 'b' to set Mic Base Level, 'f' to set Mic Scaling Factor, or 'o' to set Mic Offset.");
 }
 
 void loop()
 {
-  static int potValue = 0;
+  static byte potValue = 0;
   button1.loop();
 
   serialCheckAndSet();
@@ -176,30 +193,29 @@ void loop()
     {
       selection = 0;
     }
-    // EEPROM.update(0, selection);
+    EEPROM.update(0, selection);
   }
-  potValue = (int)map(analogRead(POT_PIN), 0, 1024, 0, 0xff);
+  potValue = (byte)map(analogRead(POT_PIN), 0, 1024, 0, 0xff);
 
   switch (selection)
   {
   case 0:
-    // colorLettersStatic(potValue);
     colorLettersStatic(0); // Make zero so that it stays on green-blue-green
     break;
   case 1:
     solid(potValue);
     break;
   case 2:
-    backAndForth(potValue);
-    break;
-  case 3:
     chase(potValue);
     break;
-  case 4:
+  case 3:
     verticalChase(potValue);
     break;
+  case 4:
+    verticalRainbow(potValue);
+    break;
   case 5:
-    verticalRainbow();
+    randomLights(potValue);
     break;
   case 6:
     horizontalChase(potValue);
@@ -211,40 +227,20 @@ void loop()
     diagChase(potValue, 1); // 1 for backwards diagonals
     break;
   case 9:
-    basicVUMeter();
+    basicVUMeter(potValue);
     break;
   case 10:
-    intensityVUMeter();
+    intensityVUMeter(potValue);
+    break;
+  case 11:
+    yellowToWhite(potValue);
     break;
   default:
     break;
   }
 }
 
-void backAndForth(int hue)
-{
-  for (int dot = 0; dot < NUM_LEDS; dot++)
-  {
-    leds[dot] = CHSV(hue, 0xff, 0x60);
-    FastLED.show();
-    // clear this led for the next time around the loop
-    leds[dot] = CRGB::Black;
-    // delay(10);
-  }
-
-  for (int dot = 0; dot < NUM_LEDS; dot++)
-  {
-
-    leds[NUM_LEDS - dot - 1] = CHSV(hue, 0xff, 0x60);
-
-    FastLED.show();
-    // clear this led for the next time around the loop
-    leds[NUM_LEDS - dot - 1] = CRGB::Black;
-    // delay(10);
-  }
-}
-
-void solid(int hue)
+void solid(byte hue)
 {
   for (int dot = 0; dot < NUM_LEDS; dot++)
   {
@@ -253,23 +249,22 @@ void solid(int hue)
   FastLED.show();
 }
 
-void chase(int hue)
+void chase(byte hue)
 {
   static int offset = 0;
-  static int iLimit = NUM_LEDS / 5 + 1;
+  static byte iLimit = (byte)(NUM_LEDS / ditherSize) + 1;
   static unsigned long timer = millis();
-  const int dither[] = {0x80, 0x60, 0x40, 0x20, 0x10};
 
-  if (millis() - timer > 200)
+  if (millis() - timer > 100)
   {
     for (int i = 0; i < iLimit; i++)
     {
-      for (int j = 0; j < 5; j++)
+      for (int j = 0; j < ditherSize; j++)
       {
-        int index = i * 5 + j;
+        int index = i * ditherSize + j;
         if (index < NUM_LEDS) // Make sure not writing outside of length of leds[]
         {
-          leds[i * 5 + j].setHSV(hue, 0xff, dither[(5 - j + offset) % 5]); // this index was annoying
+          leds[i * ditherSize + j].setHSV(hue, 0xff, dither[(ditherSize - j + offset) % ditherSize]); // this index was annoying
         }
       }
     }
@@ -279,29 +274,7 @@ void chase(int hue)
   }
 }
 
-void verticalChase(int hue)
-{
-  static int offset = 0;
-  static unsigned long timer = millis();
-  const int dither[] = {0x80, 0x60, 0x40, 0x20, 0x10};
-  // int ditherInx = 0;
-
-  if (millis() - timer > 100)
-  {
-    for (int i = 0; i < numColumns; i++)
-    {
-      for (int j = 0; j < colSizes[i]; j++)
-      {
-        leds[columns[i][j]].setHSV(hue, 0xff, dither[(5 - i % 5 + offset) % 5]);
-      }
-    }
-    FastLED.show();
-    offset++;
-    timer = millis();
-  }
-}
-
-void verticalRainbow(void)
+void verticalChase(byte hue)
 {
   static int offset = 0;
   static unsigned long timer = millis();
@@ -312,7 +285,7 @@ void verticalRainbow(void)
     {
       for (int j = 0; j < colSizes[i]; j++)
       {
-        leds[columns[i][j]].setHSV((i + offset + 5) % 255, 0xff, 0x40);
+        leds[columns[i][j]].setHSV(hue, 0xff, dither[(ditherSize - i % ditherSize + offset) % ditherSize]);
       }
     }
     FastLED.show();
@@ -321,12 +294,50 @@ void verticalRainbow(void)
   }
 }
 
-void horizontalChase(int hue)
+void verticalRainbow(byte potValue)
 {
   static int offset = 0;
   static unsigned long timer = millis();
-  const int dither[] = {0x80, 0x60, 0x40, 0x20, 0x10};
-  // int ditherInx = 0;
+  int unsigned delay = map(potValue, 0, 255, 20, 2000);
+
+  if (millis() - timer > delay)
+  {
+    for (int i = 0; i < numColumns; i++)
+    {
+      for (int j = 0; j < colSizes[i]; j++)
+      {
+        leds[columns[i][j]].setHSV((i * 10 + offset) % 255, 0xff, 0x40);
+      }
+    }
+    FastLED.show();
+    offset++;
+    timer = millis();
+  }
+}
+
+void randomLights(byte potValue)
+{
+  static bool firstTime = true;
+  static unsigned long timer = millis();
+  int unsigned delay = map(potValue, 0, 255, 100, 5000);
+  if ((millis() - timer > delay) || firstTime)
+  {
+    firstTime = false;
+    for (byte dot = 0; dot < NUM_LEDS; dot++)
+    {
+      byte hue = (byte)random(256);
+
+      leds[dot] = CHSV(hue, 0xff, MAX_BRIGHTNESS / 2);
+    }
+    FastLED.show();
+    timer = millis();
+  }
+}
+
+void horizontalChase(byte hue)
+{
+  static int offset = 0;
+  static unsigned long timer = millis();
 
   if (millis() - timer > 100)
   {
@@ -334,7 +345,7 @@ void horizontalChase(int hue)
     {
       for (int j = 0; j < rowSizes[i]; j++)
       {
-        leds[rows[i][j]].setHSV(hue, 0xff, dither[(5 - i % 5 + offset) % 5]);
+        leds[rows[i][j]].setHSV(hue, 0xff, dither[(ditherSize - i % ditherSize + offset) % ditherSize]);
       }
     }
     FastLED.show();
@@ -343,31 +354,25 @@ void horizontalChase(int hue)
   }
 }
 
-void colorLettersStatic(int hue)
+void colorLettersStatic(byte hue)
 {
   static int offset = 0;
   static unsigned long timer = millis();
-  static unsigned long timerLong = millis();
-  static bool firstTime = true;
   static int brightness = 0x40;
 
   if (millis() - timer > 200)
   {
-    if (millis() - timerLong > 5000 || firstTime)
+    for (int i = 0; i < sizeLetter1; i++)
     {
-      for (int i = 0; i < sizeC1; i++)
-      {
-        leds[letterC1[i]].setHSV((96 + hue) % 0xff, 0xff, brightness);
-      }
-      for (int i = 0; i < sizeT; i++)
-      {
-        leds[letterT[i]].setHSV((160 + hue) % 0xff, 0xff, brightness);
-      }
-      for (int i = 0; i < sizeC2; i++)
-      {
-        leds[letterC2[i]].setHSV((96 + hue) % 0xff, 0xff, brightness);
-      }
-      firstTime = false;
+      leds[letter1[i]].setHSV((96 + hue) % 0xff, 0xff, brightness); // 96 = green
+    }
+    for (int i = 0; i < sizeLetter2; i++)
+    {
+      leds[letter2[i]].setHSV((160 + hue) % 0xff, 0xff, brightness); // 160 = blue
+    }
+    for (int i = 0; i < sizeLetter3; i++)
+    {
+      leds[letter3[i]].setHSV((96 + hue) % 0xff, 0xff, brightness); // 96 = green
     }
 
     FastLED.show();
@@ -375,11 +380,10 @@ void colorLettersStatic(int hue)
   }
 }
 
-void diagChase(int hue, int diagsDirection)
+void diagChase(byte hue, byte diagsDirection)
 {
   static int offset = 0;
   static unsigned long timer = millis();
-  const int dither[] = {0x80, 0x60, 0x40, 0x20, 0x10};
   int size = 0;
 
   if (millis() - timer > 100)
@@ -398,11 +402,11 @@ void diagChase(int hue, int diagsDirection)
       {
         if (diagsDirection == 0)
         {
-          leds[diags[i][j]].setHSV(hue, 0xff, dither[(5 - i % 5 + offset) % 5]);
+          leds[diags[i][j]].setHSV(hue, 0xff, dither[(ditherSize - i % ditherSize + offset) % ditherSize]);
         }
         else
         {
-          leds[diagsBackwards[i][j]].setHSV(hue, 0xff, dither[(5 - i % 5 + offset) % 5]);
+          leds[diagsBackwards[i][j]].setHSV(hue, 0xff, dither[(ditherSize - i % ditherSize + offset) % ditherSize]);
         }
       }
     }
@@ -412,27 +416,40 @@ void diagChase(int hue, int diagsDirection)
   }
 }
 
+void yellowToWhite(byte potValue)
+{
+  byte saturation = (byte)map(potValue, 0, 255, 255, 32);
+  byte brightness = (byte)map(potValue, 0, 255, 40, 160);
+
+  for (byte dot = 0; dot < NUM_LEDS; dot++)
+  {
+    leds[dot].setHSV(32, saturation, brightness); // old value 38
+  }
+  FastLED.show();
+}
+
 int getMicValue(void)
 {
   int val = 0;
-  const int sampleSize = 256;
-  const byte shiftAmount = 8;
-  long accumulator = 0;
+  const int sampleSize = 32;
 
+  int max = 0;
+  int min = 1024;
   for (int i = 0; i < sampleSize; i++)
   {
     val = analogRead(MIC_PIN);
-    val = val - 512;
-    val = abs(val);
-    accumulator += val;
+    max = max(max, val);
+    min = min(min, val);
   }
-  int average = (int)(accumulator >> shiftAmount); // Fast divide by sampleSize by shifting shiftAmount bits.
-
-  if (average < 0)
+  int delta = max - min - micOffset;
+  if (delta > 0)
   {
-    average = 0;
+    return delta;
   }
-  return average;
+  else
+  {
+    return 0;
+  }
 }
 
 float setMicBaseLevel(float newMicBaseLevel)
@@ -453,6 +470,16 @@ float setMicScalingFactor(float newMicScalingFactor)
   }
 
   return micScalingFactor;
+}
+
+int setMicOffset(int newMicOffset)
+{
+  if (newMicOffset >= 0 && newMicOffset < 1024)
+  {
+    micOffset = newMicOffset;
+  }
+
+  return micOffset;
 }
 
 float getSerialFloat(void)
@@ -508,7 +535,9 @@ void serialCheckAndSet()
       Serial.print(micBaseLevel);
       Serial.print("  Current mic scaling factor: ");
       Serial.println(micScalingFactor);
-      Serial.println("Enter b to set Mic Base Level.  Enter f to set Mic Scaling Factor.");
+      Serial.print("  Current mic offset: ");
+      Serial.println(micOffset);
+      Serial.println("Enter 'b' to set Mic Base Level, 'f' to set Mic Scaling Factor, or 'o' to set Mic Offset.");
     }
     if (option == 'b' || option == 'B')
     {
@@ -536,10 +565,23 @@ void serialCheckAndSet()
       Serial.print("New Mic Scaling Factor: ");
       Serial.println(result);
     }
+    if (option == 'o' || option == 'O')
+    {
+      Serial.print("Current mic offset: ");
+      Serial.println(micOffset);
+      Serial.print("Enter new mic offset factor: ");
+
+      int result = (int)getSerialFloat();
+      result = setMicOffset(result);
+      EEPROM.put(EEPROM_MIC_BASE_LEVEL_LOCATION + sizeof(float) * 2, micOffset);
+
+      Serial.print("New Mic Offset: ");
+      Serial.println(result);
+    }
   }
 }
 
-void basicVUMeter(void)
+void basicVUMeter(int hue)
 {
   int numIntensities = numRows * 4;
   int value = getMicValue();
@@ -554,13 +596,17 @@ void basicVUMeter(void)
   {
     intensity = 0;
   }
+  Serial.print(value);
+  Serial.print(" - ");
+  Serial.println(intensity);
 
-  const byte brightnessGradient[4] = {32, 64, 96, 128};
-  const byte colorGradient[5] = {0, 64, 96, 96, 96}; // red, yel, grn, grn, grn  // in this order because row 0 is the top row
+  // const byte brightnessGradient[4] = {32, 64, 96, 128};
+  const byte brightnessGradient[4] = {MAX_BRIGHTNESS / 4, MAX_BRIGHTNESS / 2, MAX_BRIGHTNESS * 3 / 4, MAX_BRIGHTNESS};
+  const byte colorGradient[6] = {96, 96, 96, 96, 64, 0}; // grn, grn, grn, grn, yellow, red
   // Loop to set row color and brightness based off of intensity; only necessary to loop up to the intensity
   for (int i = 0; i < intensity; i++)
   {
-    int rowNumberIndex = 4 - (int)(i / 4); // Calc current row based on index --> 4 intensities per row
+    int rowNumberIndex = (int)(i / 4);
     int brightness = brightnessGradient[i % 4];
 
     for (int j = 0; j < rowSizes[rowNumberIndex]; j++) // Fill leds for current row
@@ -571,26 +617,26 @@ void basicVUMeter(void)
 
   FastLED.show();
 
-  // for (int i = 0; i < NUM_LEDS; i++)
-  // {
-  //   leds[i].setHSV(160, 0xff, 0x20);
-  // }
-
-  for (int i = 0; i < sizeC1; i++)
+  //   for (int dot = 0; dot < NUM_LEDS; dot++)
+  //   {
+  //     leds[dot].setHSV(hue, 0xff, 0x10);
+  //   }
+  byte brightness = 0x10;
+  for (int i = 0; i < sizeLetter1; i++)
   {
-    leds[letterC1[i]].setHSV(96, 0xff, 10);
+    leds[letter1[i]].setHSV((96), 0xff, brightness); // 96 = green
   }
-  for (int i = 0; i < sizeT; i++)
+  for (int i = 0; i < sizeLetter2; i++)
   {
-    leds[letterT[i]].setHSV(160, 0xff, 20);
+    leds[letter2[i]].setHSV((160), 0xff, brightness); // 160 = blue
   }
-  for (int i = 0; i < sizeC2; i++)
+  for (int i = 0; i < sizeLetter3; i++)
   {
-    leds[letterC2[i]].setHSV(96, 0xff, 10);
+    leds[letter3[i]].setHSV((96), 0xff, brightness); // 96 = green
   }
 }
 
-void intensityVUMeter(void)
+void intensityVUMeter(int hue)
 {
   int numIntensities = 20;
   int value = getMicValue();
@@ -606,15 +652,23 @@ void intensityVUMeter(void)
     intensity = 0;
   }
 
-  int brightness = 0;
-  brightness = (0x80 - 0x10) * intensity / numIntensities + 0x10;
-  int hue = 0;
-  hue = (85 - 160) * intensity / numIntensities + 160;
+  byte brightness = (byte)((MAX_BRIGHTNESS - 0x10) * intensity / numIntensities + 0x10);
 
-  for (int i = 0; i < NUM_LEDS; i++)
+  // for (int i = 0; i < NUM_LEDS; i++)
+  // {
+  //   leds[i].setHSV(hue % 0xff, 0xff, brightness);
+  // }
+  for (int i = 0; i < sizeLetter1; i++)
   {
-    leds[i].setHSV(hue % 0xff, 0xff, brightness);
+    leds[letter1[i]].setHSV((96), 0xff, brightness); // 96 = green
   }
-
+  for (int i = 0; i < sizeLetter2; i++)
+  {
+    leds[letter2[i]].setHSV((160), 0xff, brightness); // 160 = blue
+  }
+  for (int i = 0; i < sizeLetter3; i++)
+  {
+    leds[letter3[i]].setHSV((96), 0xff, brightness); // 96 = green
+  }
   FastLED.show();
 }
